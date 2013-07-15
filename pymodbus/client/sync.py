@@ -62,6 +62,11 @@ class BaseModbusClient(ModbusClientMixin):
         '''
         raise NotImplementedException("Method not implemented by derived class")
 
+    def _flush_input(self):
+        ''' Flush input stream
+        '''
+        raise NotImplementedException("Method not implemented by derived class")    
+
     def _recv(self, size):
         ''' Reads data from the underlying descriptor
 
@@ -294,6 +299,9 @@ class ModbusSerialClient(BaseModbusClient):
         self.parity   = kwargs.get('parity',   Defaults.Parity)
         self.baudrate = kwargs.get('baudrate', Defaults.Baudrate)
         self.timeout  = kwargs.get('timeout',  Defaults.Timeout)
+        self.retries = kwargs.get('retries' , Defaults.Retries)
+        self.retry_on_empty = kwargs.get('retry_on_empty',  Defaults.RetryOnEmpty)
+        self.retry_on_wrong = kwargs.get('retry_on_wrong',  Defaults.RetryOnWrong)
 
     @staticmethod
     def __implementation(method):
@@ -342,6 +350,10 @@ class ModbusSerialClient(BaseModbusClient):
         if request:
             return self.socket.write(request)
         return 0
+    
+    def _flush_input(self):
+        if self.socket:
+            self.socket.flushInput()    
 
     def _recv(self, size):
         ''' Reads data from the underlying descriptor

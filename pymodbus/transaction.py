@@ -50,15 +50,21 @@ class ModbusTransactionManager(object):
         ''' Starts the producer to send the next request to
         consumer.write(Frame(request))
         '''
-        retries = Defaults.Retries
+        retries = self.client.retries
         request.transaction_id = self.getNextTID()
-        retry_empty = Defaults.RetryOnEmpty
-        _logger.debug("Running transaction %d" % request.transaction_id)        
+        retry_empty = self.client.retry_on_empty
+        retry_on_wrong_answer = self.client.retry_on_wrong
+        _logger.debug("Running transaction %d" % request.transaction_id)
+        response = None
 
         while retries > 0:
             try:
                 self.client.connect()
                 packet  = self.client.framer.buildPacket(request)
+                
+                # Nothing received before request matters on sync client
+                self.client._flush_input()
+                                
                 self.client._send(packet)
 #                 I need to fix this to read the header and the result size,
 #                 as this may not read the full result set, but right now
@@ -66,7 +72,7 @@ class ModbusTransactionManager(object):
 
                 callback = lambda result: self.addTransaction(request = result, tid = request.transaction_id)
                 
-#                Could use the framer header size here 
+#                Could use the framer header size here
                 result = self.client._recv(1)
                 while result:
                     self.client.framer.processIncomingPacket(result, callback)                    
@@ -74,16 +80,26 @@ class ModbusTransactionManager(object):
                         break
                     result = self.client._recv(1)
 
-                if retry_empty and not self.hasTransaction(request.transaction_id):
-                    retries -= 1
+                response = self.getTransaction(request.transaction_id)                
+                if retry_empty and response == None:
+                    retries -= 1                
+                elif response != None and request.function_code != response.function_code:
+                    _logger.error("Response function different from request: %s != %s (%s)" % (request.function_code, response.function_code, request))
+                    if retry_on_wrong_answer:
+                        retries -= 1
+                elif response != None and request.unit_id != response.unit_id:
+                    _logger.error("Response unit different from request: %s != %s (%s)" % (request.unit_id, response.unit_id, request))
+                    if retry_on_wrong_answer:
+                        retries -= 1                        
                 else:
                     break;
 
             except socket.error, msg:
                 self.client.close()
                 _logger.debug("Transaction failed. (%s) " % msg)
-                retries -= 1
-        return self.getTransaction(request.transaction_id)
+                retries -= 1        
+                          
+        return response
 
     def addTransaction(self, request, tid=None):
         ''' Adds a transaction to the handler
